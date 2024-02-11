@@ -1,0 +1,95 @@
+version: "3.5"
+
+services:
+  api01: &api
+    image: ghcr.io/cleitinif/rinha-de-backend-2024-q1:latest
+    hostname: api01
+    labels:
+      logging: "promtail"
+      job: "api01"
+      instance: "api01"
+      logging_jobname: "api01"
+      logging_group: "api"
+    networks:
+      - rinha
+    environment:
+      - DB_HOST=db
+      - DB_USER=admin
+      - DB_PASSWORD=123
+      - DB_DATABASE=database
+      - DB_PORT=5432
+      - DB_MIN_CONNECTIONS=20
+      - DB_MAX_CONNECTIONS=20
+      - DB_MAX_CONN_IDLE_TIME=0
+      - DB_MAX_CONN_LIFETIME=0
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel_collector:4317
+      - OPEN_TELEMETRY_ENABLED=false
+      - SERVICE_NAME=api
+      - GO_ENV=production
+      - GIN_MODE=release
+    depends_on:
+      - db
+    deploy:
+      resources:
+        limits:
+          cpus: "0.40"
+          memory: "100MB"
+
+  api02:
+    <<: *api
+    hostname: api02
+    labels:
+      logging: "promtail"
+      logging_jobname: "api02"
+      logging_group: "api"
+      job: "api02"
+      instance: "api02"
+
+  haproxy:
+    image: haproxy:2.9.4
+    hostname: haproxy
+    privileged: true
+    networks:
+      - rinha
+    ports:
+      - "9999:80"
+    volumes:
+      - ./volumes/haproxy/init/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg
+    deploy:
+      resources:
+        limits:
+          cpus: "0.10"
+          memory: "100MB"
+    depends_on:
+      - api01
+      - api02
+
+  db:
+    image: postgres:16.1-alpine3.19
+    hostname: db
+    labels:
+      logging: "promtail"
+      logging_jobname: "postgres"
+      logging_group: "postgres"
+    networks:
+      - rinha
+    environment:
+      - POSTGRES_PASSWORD=123
+      - POSTGRES_USER=admin
+      - POSTGRES_DB=database
+    volumes:
+      - ./volumes/postgres/init/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./volumes/postgres/init/postgresql.conf:/etc/postgresql.conf
+    command: postgres -c config_file=/etc/postgresql.conf
+    ports:
+      - "5432:5432"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.60"
+          memory: "250MB"
+
+networks:
+  rinha:
+    driver: bridge
+    name: rinha-nginx

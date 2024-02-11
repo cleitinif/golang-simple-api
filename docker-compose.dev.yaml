@@ -1,0 +1,228 @@
+version: "3.5"
+
+services:
+  api01: &api
+    build:
+      context: ./app
+      dockerfile: ./Dockerfile
+    hostname: api01
+    labels:
+      logging: "promtail"
+      job: "api01"
+      instance: "api01"
+      logging_jobname: "api01"
+      logging_group: "api"
+    networks:
+      - rinha
+    environment:
+      - DB_HOST=db
+      - DB_USER=admin
+      - DB_PASSWORD=123
+      - DB_DATABASE=database
+      - DB_PORT=5432
+      - DB_MIN_CONNECTIONS=10
+      - DB_MAX_CONNECTIONS=100
+      - DB_MAX_CONN_IDLE_TIME=0
+      - DB_MAX_CONN_LIFETIME=0
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel_collector:4317
+      - OPEN_TELEMETRY_ENABLED=true
+      - SERVICE_NAME=api
+      - GO_ENV=production
+      - GIN_MODE=release
+    ports:
+      - "3001:8080"
+      - "2113:2112"
+    depends_on:
+      - db
+    deploy:
+      resources:
+        limits:
+          cpus: "0.37"
+          memory: "105MB"
+
+  api02:
+    <<: *api
+    hostname: api02
+    labels:
+      logging: "promtail"
+      logging_jobname: "api02"
+      logging_group: "api"
+      job: "api02"
+      instance: "api02"
+    ports:
+      - "3002:8080"
+      - "2114:2112"
+
+  # api03:
+  #   <<: *api
+  #   hostname: api03
+  #   labels:
+  #     logging: "promtail"
+  #     logging_jobname: "api03"
+  #     logging_group: "api"
+  #     job: "api03"
+  #     instance: "api03"
+  #   ports:
+  #     - "3003:8080"
+  #     - "2115:2112"
+
+  haproxy:
+    image: haproxy:2.9.4
+    hostname: haproxy
+    networks:
+      - rinha
+    ports:
+      - "9999:80"
+      - "8404:8404"
+    volumes:
+      - ./volumes/haproxy/init/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg
+    deploy:
+      resources:
+        limits:
+          cpus: "0.24"
+          memory: "140MB"
+    depends_on:
+      - api01
+      - api02
+      # - api03
+
+  db:
+    image: postgres:16.1-alpine3.19
+    hostname: db
+    labels:
+      logging: "promtail"
+      logging_jobname: "postgres"
+      logging_group: "postgres"
+    networks:
+      - rinha
+    environment:
+      - POSTGRES_PASSWORD=123
+      - POSTGRES_USER=admin
+      - POSTGRES_DB=database
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./volumes/postgres/init/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./volumes/postgres/init/postgresql.conf:/etc/postgresql.conf
+    command: postgres -c config_file=/etc/postgresql.conf
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "200MB"
+
+  db_metrics:
+    image: quay.io/prometheuscommunity/postgres-exporter
+    hostname: db_metrics
+    networks:
+      - rinha
+    environment:
+      # - DATA_SOURCE_NAME=postgresql://admin:123@db:5432/database?sslmode=disable
+      - DATA_SOURCE_URI=db:5432/database?sslmode=disable
+      - DATA_SOURCE_USER=admin
+      - DATA_SOURCE_PASS=123
+      - DATA_SOURCE_DB=database
+      - DATA_SOURCE_SSL_MODE=disable
+    ports:
+      - "9187:9187"
+    depends_on:
+      - db
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    networks:
+      - rinha
+    volumes:
+      - "./volumes/jaeger/init/jaeger-ui.json:/etc/jaeger/jaeger-ui.json"
+      - "./volumes/jaeger/badger:/badger"
+    command: --query.ui-config /etc/jaeger/jaeger-ui.json
+    environment:
+      - METRICS_STORAGE_TYPE=prometheus
+      - PROMETHEUS_SERVER_URL=http://prometheus:9090
+      - SPAN_STORAGE_TYPE=badger
+      - BADGER_DIRECTORY_VALUE=/badger/data
+      - BADGER_DIRECTORY_KEY=/badger/key
+      - BADGER_EPHEMERAL=false
+    ports:
+      - "14250:14250"
+      - "14268:14268"
+      - "6831:6831/udp"
+      - "16686:16686"
+      - "16685:16685"
+
+  otel_collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    hostname: otel_collector
+    networks:
+      - rinha
+    volumes:
+      - "./volumes/otel-collector/init/otel-collector-config.yml:/etc/otelcol/otel-collector-config.yml"
+    command: --config /etc/otelcol/otel-collector-config.yml
+    ports:
+      - 1888:1888 # pprof extension
+      - 8888:8888 # Prometheus metrics exposed by the Collector
+      - 8889:8889 # Prometheus exporter metrics
+      - 13133:13133 # health_check extension
+      - 4317:4317 # OTLP gRPC receiver
+      - 4318:4318 # OTLP http receiver
+      - 55679:55679 # zpages extension
+      - 14278:14278 # Jaeger receiver
+    depends_on:
+      - jaeger
+
+  prometheus:
+    image: prom/prometheus:latest
+    networks:
+      - rinha
+    volumes:
+      - "./volumes/prometheus/init/prometheus.yml:/etc/prometheus/prometheus.yml"
+      - "./volumes/prometheus/data:/prometheus"
+    ports:
+      - "9090:9090"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+
+  grafana:
+    image: grafana/grafana:latest
+    networks:
+      - rinha
+    volumes:
+      - "./volumes/grafana/init/grafana.ini:/etc/grafana/grafana.ini"
+      - "./volumes/grafana:/var/lib/grafana"
+      - "./volumes/grafana/init/provisioning:/etc/grafana/provisioning"
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+
+  loki:
+    image: grafana/loki:2.9.4
+    networks:
+      - rinha
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./volumes/loki/init/loki-config.yaml:/etc/loki/local-config.yaml
+
+  promtail:
+    image: grafana/promtail:latest
+    container_name: promtail
+    networks:
+      - rinha
+    volumes:
+      - ./volumes/promtail/init/promtail.yaml:/etc/promtail/docker-config.yaml
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: -config.file=/etc/promtail/docker-config.yaml
+    depends_on:
+      - loki
+
+networks:
+  rinha:
+    driver: bridge
+    name: rinha-nginx
