@@ -4,7 +4,6 @@ import (
 	"context"
 	"math"
 	"participantes/cleitinif/config"
-	cc "participantes/cleitinif/context"
 	"participantes/cleitinif/dto"
 	"participantes/cleitinif/errors"
 	"participantes/cleitinif/models"
@@ -13,7 +12,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"go.uber.org/zap"
 )
 
 type CustomerService struct {
@@ -29,9 +27,6 @@ func NewCustomerService(customerRepository *repositories.CustomerRepository, poo
 }
 
 func (cs *CustomerService) GetStatement(ctx context.Context, id int) (*models.Statement, error) {
-	logger := ctx.Value(cc.LoggerKey{}).(*zap.SugaredLogger)
-	logger.Debugw("Getting statement", "customerId", id)
-
 	manager, err := cs.pool.Acquire(ctx)
 	if err != nil {
 		return nil, errors.NewInternalError()
@@ -78,9 +73,6 @@ func (cs *CustomerService) GetStatement(ctx context.Context, id int) (*models.St
 }
 
 func (cs *CustomerService) InsertTransaction(ctx context.Context, transaction models.Transaction, id int) (*dto.InsertTransactionResponse, error) {
-	logger := ctx.Value(cc.LoggerKey{}).(*zap.SugaredLogger)
-	logger.Debugw("Inserting transaction", "transaction", transaction, "customerId", id)
-
 	manager, err := cs.pool.Acquire(ctx)
 	if err != nil {
 		return nil, errors.NewInternalError()

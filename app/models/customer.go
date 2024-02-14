@@ -13,15 +13,3 @@ func NewCustomer(id, limit, saldo int) *Customer {
 		Amout: saldo,
 	}
 }
-
-func (c *Customer) Withdraw(amount int) {
-	c.Amout -= amount
-}
-
-func (c *Customer) Deposit(amount int) {
-	c.Amout += amount
-}
-
-func (c *Customer) CanWithdraw(amount int) bool {
-	return c.Amout-amount >= c.Limit
-}
