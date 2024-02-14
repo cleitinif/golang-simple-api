@@ -14,11 +14,7 @@ Submissão feita com:
 - `postgres` como banco de dados
 - `golang` como linguagem de programação da API
 
-## Resultados
-
 [Repositório](https://github.com/cleitinif/rinha-de-backend-2024-q1)
-
-![Gatling results](./assets/results.png)
 
 ## Contato
 
